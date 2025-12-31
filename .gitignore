@@ -1,0 +1,96 @@
+# Build directories
+build/
+build-*/
+cmake-build-*/
+out/
+
+# CMake generated files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.cmake
+!CMakeLists.txt
+
+# Compiled binaries
+*.o
+*.a
+*.so
+*.so.*
+*.dylib
+*.exe
+*.out
+yolo_inference
+
+# Debug files
+*.dSYM/
+*.su
+*.idb
+*.pdb
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.code-workspace
+
+# Output files
+*.mp4
+*.avi
+*.mkv
+output*.mp4
+output*.avi
+test_output*.mp4
+*.csv
+benchmark_results/
+results/
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+temp_*.avi
+temp_*.mp4
+
+# Python cache (if using Python scripts)
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+.pytest_cache/
+
+# Model files (large binary files - optional, uncomment if needed)
+# *.bin
+# *.param
+# *.onnx
+# *.ncnn.bin
+# *.ncnn.param
+
+# Dependencies (if building from source)
+deps/ncnn/
+deps/opencv/
+third_party/
+
+# Test videos (uncomment if you want to exclude test data)
+# tests/*.mp4
+# tests/*.avi
+
+# System files
+.Trash-*/
+Thumbs.db
+
+# Core dumps
+core
+core.*
+
+# Valgrind
+*.valgrind
+vgcore.*
+
+# Backup files
+*.bak
+*.backup
+*~
