@@ -58,7 +58,7 @@ cd /home/pi/AI/EdgeVisionRT
 ### 2. Run with `run.sh`
 The `run.sh` script handles governor settings, thread affinity, and library paths automatically.
 
-#### 📷 Webcam Mode (NEW!)
+#### Webcam Mode (NEW!)
 ```bash
 # Webcam + OpenCV Display
 ./run.sh cam display
@@ -70,7 +70,7 @@ The `run.sh` script handles governor settings, thread affinity, and library path
 ./run.sh cam display class person
 ```
 
-#### 🎥 Video File Mode
+#### Video File Mode
 ```bash
 # Benchmark (No display)
 ./run.sh
@@ -82,7 +82,7 @@ The `run.sh` script handles governor settings, thread affinity, and library path
 ./run.sh fb
 ```
 
-#### 🏎️ Acceleration Options
+#### Acceleration Options
 ```bash
 # Use FP16 (Recommended)
 ./run.sh cam display fp16
