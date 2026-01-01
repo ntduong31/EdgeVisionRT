@@ -411,7 +411,7 @@ class AsyncDisplay {
 public:
     struct Config {
         std::string window_name = "YOLOv8n Detection";
-        int queue_size = 5;         // Small queue for low latency
+        int queue_size = 2;         // Reduced: only need latest frame
         bool draw_fps = true;
         bool draw_bbox = true;
         int display_cpu = 0;        // Pin to CPU 0
@@ -419,7 +419,8 @@ public:
     };
     
     AsyncDisplay() : running_(false), frames_displayed_(0), frames_dropped_(0),
-                     display_width_(640), display_height_(480) {}
+                     display_width_(640), display_height_(480), 
+                     pending_frame_ready_(false) {}
     
     ~AsyncDisplay() {
         stop();
@@ -449,7 +450,6 @@ public:
         if (!running_) return;
         
         running_ = false;
-        cv_.notify_all();
         
         if (display_thread_.joinable()) {
             display_thread_.join();
@@ -457,27 +457,32 @@ public:
         // Window cleanup handled in display_loop()
     }
     
+    // OPTIMIZED: Non-blocking push - skip if display is busy
     bool push(const cv::Mat& frame, const DetectionResult& result,
               int orig_width, int orig_height, float fps = 0, float inference_ms = 0) {
         
-        FrameData fd;
-        fd.frame = frame.clone();
-        fd.detections = result;
-        fd.original_width = orig_width;
-        fd.original_height = orig_height;
-        fd.fps = fps;
-        fd.inference_ms = inference_ms;
-        
-        {
-            std::lock_guard<std::mutex> lock(mutex_);
-            // Drop oldest frame if queue is full (keep latest for smooth display)
-            while (queue_.size() >= static_cast<size_t>(config_.queue_size)) {
-                queue_.pop();
-                frames_dropped_++;
-            }
-            queue_.push(std::move(fd));
+        // TRY to acquire lock - if busy, skip this frame (don't block inference!)
+        std::unique_lock<std::mutex> lock(pending_mutex_, std::try_to_lock);
+        if (!lock.owns_lock()) {
+            frames_dropped_++;
+            return false;  // Display busy, skip frame
         }
-        cv_.notify_one();
+        
+        // Copy to pending buffer (very fast - just pointer swap if same size)
+        if (pending_frame_.empty() || 
+            pending_frame_.cols != frame.cols || 
+            pending_frame_.rows != frame.rows) {
+            pending_frame_ = frame.clone();
+        } else {
+            frame.copyTo(pending_frame_);
+        }
+        
+        pending_detections_ = result;
+        pending_orig_width_ = orig_width;
+        pending_orig_height_ = orig_height;
+        pending_fps_ = fps;
+        pending_inference_ms_ = inference_ms;
+        pending_frame_ready_ = true;
         
         return true;
     }
@@ -526,8 +531,8 @@ private:
     }
     
     void display_loop() {
-        // Pin to CPU 0 (isolated from inference)
-        set_thread_affinity(config_.display_cpu);
+        // Pin to CPU 3 (isolated from NCNN inference on CPU 0-2)
+        set_thread_affinity(3);
         
         // Low priority
         nice(10);
@@ -538,49 +543,58 @@ private:
         cv::moveWindow(config_.window_name, window_x_, window_y_);
         
         cv::Mat display_frame;
+        cv::Mat local_frame;
+        DetectionResult local_detections;
+        int local_orig_width, local_orig_height;
+        float local_fps, local_inference_ms;
         
         while (running_) {
-            FrameData fd;
+            bool has_frame = false;
             
+            // Quick lock to grab pending frame
             {
-                std::unique_lock<std::mutex> lock(mutex_);
-                cv_.wait_for(lock, std::chrono::milliseconds(30), [this] {
-                    return !queue_.empty() || !running_;
-                });
-                
-                if (queue_.empty()) {
-                    if (!running_) break;
-                    continue;
+                std::lock_guard<std::mutex> lock(pending_mutex_);
+                if (pending_frame_ready_) {
+                    // Swap to avoid copy
+                    cv::swap(local_frame, pending_frame_);
+                    local_detections = pending_detections_;
+                    local_orig_width = pending_orig_width_;
+                    local_orig_height = pending_orig_height_;
+                    local_fps = pending_fps_;
+                    local_inference_ms = pending_inference_ms_;
+                    pending_frame_ready_ = false;
+                    has_frame = true;
                 }
-                
-                // Get latest frame (skip old ones for smooth display)
-                while (queue_.size() > 1) {
-                    queue_.pop();
-                    frames_dropped_++;
-                }
-                
-                fd = std::move(queue_.front());
-                queue_.pop();
             }
             
-            if (fd.frame.empty()) continue;
+            if (!has_frame) {
+                // No new frame, just process events quickly
+                int key = cv::waitKey(1);
+                if (key == 27 || key == 'q' || key == 'Q') {
+                    running_ = false;
+                    break;
+                }
+                continue;
+            }
+            
+            if (local_frame.empty()) continue;
             
             // Resize for display
-            if (fd.frame.cols != display_width_ || fd.frame.rows != display_height_) {
-                cv::resize(fd.frame, display_frame, cv::Size(display_width_, display_height_));
+            if (local_frame.cols != display_width_ || local_frame.rows != display_height_) {
+                cv::resize(local_frame, display_frame, cv::Size(display_width_, display_height_));
             } else {
-                display_frame = fd.frame;
+                display_frame = local_frame;
             }
             
             // Draw bboxes
             if (config_.draw_bbox) {
-                BBoxRenderer::draw(display_frame, fd.detections,
-                                  fd.original_width, fd.original_height);
+                BBoxRenderer::draw(display_frame, local_detections,
+                                  local_orig_width, local_orig_height);
             }
             
             // Draw FPS overlay
-            if (config_.draw_fps && fd.fps > 0) {
-                BBoxRenderer::draw_fps(display_frame, fd.fps, fd.inference_ms);
+            if (config_.draw_fps && local_fps > 0) {
+                BBoxRenderer::draw_fps(display_frame, local_fps, local_inference_ms);
             }
             
             // Show frame
@@ -588,7 +602,7 @@ private:
             
             // Handle key events (non-blocking)
             int key = cv::waitKey(1);
-            if (key == 27 || key == 'q' || key == 'Q') {  // ESC or Q to quit
+            if (key == 27 || key == 'q' || key == 'Q') {
                 running_ = false;
                 break;
             }
@@ -596,10 +610,9 @@ private:
             frames_displayed_++;
         }
         
-        // Clean up window - call waitKey to process final events
-        cv::waitKey(1);
+        // Clean up window
         cv::destroyWindow(config_.window_name);
-        cv::waitKey(1);  // Process destroy event
+        cv::waitKey(1);
     }
     
     Config config_;
@@ -612,9 +625,13 @@ private:
     std::atomic<int> frames_displayed_;
     std::atomic<int> frames_dropped_;
     
-    std::queue<FrameData> queue_;
-    mutable std::mutex mutex_;
-    std::condition_variable cv_;
+    // OPTIMIZED: Single pending frame with try_lock instead of queue
+    std::mutex pending_mutex_;
+    cv::Mat pending_frame_;
+    DetectionResult pending_detections_;
+    int pending_orig_width_, pending_orig_height_;
+    float pending_fps_, pending_inference_ms_;
+    std::atomic<bool> pending_frame_ready_;
 };
 
 }  // namespace yolo

@@ -32,7 +32,7 @@ message(STATUS "CXX flags: ${CMAKE_CXX_FLAGS_RELEASE}")
 # Find Dependencies
 # ============================================================================
 
-# NCNN
+# NCNN (with Vulkan support)
 if(NCNN_DIR)
     find_package(ncnn REQUIRED PATHS ${NCNN_DIR})
 else()
@@ -44,6 +44,18 @@ if(ncnn_FOUND)
     message(STATUS "NCNN found: ${ncnn_DIR}")
 else()
     message(FATAL_ERROR "NCNN not found. Please set -DNCNN_DIR=/path/to/ncnn/lib/cmake/ncnn")
+endif()
+
+# Vulkan (for GPU acceleration on RPi5 VideoCore VII)
+find_package(Vulkan QUIET)
+if(Vulkan_FOUND)
+    message(STATUS "Vulkan found: ${Vulkan_LIBRARIES}")
+    add_definitions(-DNCNN_VULKAN=1)
+    set(NCNN_HAS_VULKAN ON)
+else()
+    message(STATUS "Vulkan not found, GPU acceleration disabled")
+    add_definitions(-DNCNN_VULKAN=0)
+    set(NCNN_HAS_VULKAN OFF)
 endif()
 
 # OpenCV (for video file reading)
@@ -124,6 +136,20 @@ set(SOURCES
     src/benchmark.cpp
 )
 
+# Assembly sources (compiled separately to avoid LTO issues)
+set(ASM_SOURCES
+    src/asm_kernels.S
+)
+
+# Enable ASM for assembly compilation
+enable_language(ASM)
+
+# Set properties for ASM files
+set_source_files_properties(${ASM_SOURCES} PROPERTIES
+    LANGUAGE ASM
+    COMPILE_FLAGS "-x assembler-with-cpp"
+)
+
 set(HEADERS
     include/common.h
     include/neon_preprocess.h
@@ -131,13 +157,14 @@ set(HEADERS
     include/inference_engine.h
     include/postprocess.h
     include/benchmark.h
+    include/asm_kernels.h
 )
 
 # ============================================================================
 # Build Executable
 # ============================================================================
 
-add_executable(yolo_inference ${SOURCES} ${HEADERS})
+add_executable(yolo_inference ${SOURCES} ${ASM_SOURCES} ${HEADERS})
 
 target_include_directories(yolo_inference PRIVATE
     ${CMAKE_SOURCE_DIR}/include
@@ -149,6 +176,11 @@ target_link_libraries(yolo_inference PRIVATE
     ${OpenCV_LIBS}
     Threads::Threads
 )
+
+# Link Vulkan if available
+if(Vulkan_FOUND AND NCNN_HAS_VULKAN)
+    target_link_libraries(yolo_inference PRIVATE ${Vulkan_LIBRARIES})
+endif()
 
 # Enable Link-Time Optimization
 set_property(TARGET yolo_inference PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
@@ -174,6 +206,8 @@ message(STATUS "")
 message(STATUS "YOLOv8n Inference System Configuration:")
 message(STATUS "  Build type:      ${CMAKE_BUILD_TYPE}")
 message(STATUS "  NCNN:            ${ncnn_DIR}")
+message(STATUS "  NCNN Vulkan:     ${NCNN_HAS_VULKAN}")
 message(STATUS "  OpenCV:          ${OpenCV_VERSION}")
+message(STATUS "  Vulkan:          ${Vulkan_FOUND}")
 message(STATUS "  Install prefix:  ${CMAKE_INSTALL_PREFIX}")
 message(STATUS "")

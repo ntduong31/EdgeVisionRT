@@ -67,40 +67,63 @@ echo performance | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governo
 ### Build
 
 ```bash
-cd /home/pi/AI
+cd /home/pi/AI/EdgeVisionRT
 ./build.sh
 ```
 
 Build output: `build/yolo_inference`
 
-### Run Inference
+### Quick Run
+
+Use the convenient `run.sh` script:
+
+```bash
+# Basic benchmark (200 frames)
+./run.sh
+
+# Save video with detections
+./run.sh video output.mp4
+
+# Real-time display window
+./run.sh display
+
+# Filter specific classes
+./run.sh class "person,car,dog"
+
+# All features: display + video output
+./run.sh all output.mp4
+```
+
+### Manual Run
 
 #### Basic Video Inference
 ```bash
-OMP_NUM_THREADS=4 ./build/yolo_inference \
-  --video tests/human.mp4 \
-  --param models/yolov8n_ncnn_model/model.ncnn.param \
-  --bin models/yolov8n_ncnn_model/model.ncnn.bin \
-  --frames 500 --warmup 50
+cd build
+OMP_NUM_THREADS=4 ./yolo_inference \
+  --video ../tests/human.mp4 \
+  --param ../models/yolov8n_ncnn_model/model.ncnn.param \
+  --bin ../models/yolov8n_ncnn_model/model.ncnn.bin \
+  --frames 200
 ```
 
 #### Video with BBox Rendering and MP4 Output
 ```bash
-OMP_NUM_THREADS=4 ./build/yolo_inference \
-  --video tests/human.mp4 \
-  --param models/yolov8n_ncnn_model/model.ncnn.param \
-  --bin models/yolov8n_ncnn_model/model.ncnn.bin \
+cd build
+OMP_NUM_THREADS=4 ./yolo_inference \
+  --video ../tests/human.mp4 \
+  --param ../models/yolov8n_ncnn_model/model.ncnn.param \
+  --bin ../models/yolov8n_ncnn_model/model.ncnn.bin \
   --output-video output.mp4 \
-  --frames 0 \
-  --warmup 50
+  --frames 0
 ```
 
 #### Camera Inference
 ```bash
-OMP_NUM_THREADS=4 ./build/yolo_inference \
+cd build
+OMP_NUM_THREADS=4 ./yolo_inference \
   --camera /dev/video0 \
-  --param models/yolov8n_ncnn_model/model.ncnn.param \
-  --bin models/yolov8n_ncnn_model/model.ncnn.bin
+  --param ../models/yolov8n_ncnn_model/model.ncnn.param \
+  --bin ../models/yolov8n_ncnn_model/model.ncnn.bin
 ```
 
 ---

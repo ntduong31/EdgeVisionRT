@@ -11,6 +11,7 @@
  */
 
 #include "neon_preprocess.h"
+#include "asm_kernels.h"
 #include <cmath>
 #include <algorithm>
 #include <atomic>
@@ -216,6 +217,12 @@ void yuyv_to_rgb_neon(
 // Bilinear Resize
 // ============================================================================
 
+/**
+ * Bilinear resize with NEON optimization
+ * Disable aggressive loop optimizations to avoid false warnings
+ */
+#pragma GCC push_options
+#pragma GCC optimize ("no-aggressive-loop-optimizations")
 void bilinear_resize_rgb_neon(
     const uint8_t* __restrict src,
     uint8_t* __restrict dst,
@@ -295,8 +302,8 @@ void bilinear_resize_rgb_neon(
             }
         }
         
-        // Handle remaining pixels
-        for (; dx < dst_width; dx++) {
+        // Handle remaining pixels with bounds check
+        while (dx < dst_width) {
             int sx_fixed = dx * x_scale;
             int sx = std::min(sx_fixed >> 16, src_width - 2);
             int fx = sx_fixed & 0xFFFF;
@@ -314,9 +321,11 @@ void bilinear_resize_rgb_neon(
                 int bot = (p10 * wx0 + p11 * wx1) >> 8;
                 dst_row[dx * 3 + c] = (top * wy0 + bot * wy1) >> 8;
             }
+            dx++;
         }
     }
 }
+#pragma GCC pop_options
 
 // ============================================================================
 // Letterbox Resize
@@ -641,6 +650,12 @@ static void bilinear_resize_bgr_to_rgb_neon(
     }
 }
 
+/**
+ * RGB to CHW FP32 conversion with NEON vectorization
+ * Disable aggressive loop optimizations to avoid false warnings
+ */
+#pragma GCC push_options
+#pragma GCC optimize ("no-aggressive-loop-optimizations")
 static void rgb_to_chw_fp32_neon(
     const uint8_t* __restrict src,
     float* __restrict dst,
@@ -667,7 +682,8 @@ static void rgb_to_chw_fp32_neon(
         }
         
         int x = 0;
-        for (; x <= width - 8; x += 8) {
+        const int width_safe = (width >= 8) ? (width - 8) : 0;
+        for (; x <= width_safe; x += 8) {
             uint8x8x3_t rgb = vld3_u8(src_row + x * 3);
             
             // R channel
@@ -704,13 +720,16 @@ static void rgb_to_chw_fp32_neon(
             }
         }
         
-        for (; x < width; x++) {
+        // Scalar fallback for remaining pixels
+        while (x < width) {
             dst_r_row[x] = src_row[x * 3] * scale;
             dst_g_row[x] = src_row[x * 3 + 1] * scale;
             dst_b_row[x] = src_row[x * 3 + 2] * scale;
+            x++;
         }
     }
 }
+#pragma GCC pop_options
 
 void preprocess_bgr_direct(
     const uint8_t* __restrict bgr_src,
@@ -761,10 +780,15 @@ void preprocess_bgr_direct(
                new_width * 3);
     }
     
-    // Convert to FP32 CHW
-    rgb_to_chw_fp32_neon(
-        g_letterbox_buffer, fp32_dst,
-        MODEL_SIZE, MODEL_SIZE,
+    // Convert to FP32 CHW using ASSEMBLY kernel (fastest path)
+    size_t channel_size = MODEL_SIZE * MODEL_SIZE;
+    rgb_to_chw_fp32_asm(
+        g_letterbox_buffer,
+        fp32_dst,                    // R channel
+        fp32_dst + channel_size,     // G channel
+        fp32_dst + channel_size * 2, // B channel
+        MODEL_SIZE,
+        MODEL_SIZE,
         MODEL_SIZE * 3
     );
 }
@@ -821,10 +845,15 @@ void preprocess_yuyv_to_fp32(
                new_width * 3);
     }
     
-    // Convert to FP32 CHW
-    rgb_to_chw_fp32_neon(
-        g_letterbox_buffer, fp32_dst,
-        MODEL_SIZE, MODEL_SIZE,
+    // Convert to FP32 CHW using ASSEMBLY kernel
+    size_t channel_size = MODEL_SIZE * MODEL_SIZE;
+    rgb_to_chw_fp32_asm(
+        g_letterbox_buffer,
+        fp32_dst,
+        fp32_dst + channel_size,
+        fp32_dst + channel_size * 2,
+        MODEL_SIZE,
+        MODEL_SIZE,
         MODEL_SIZE * 3
     );
 }

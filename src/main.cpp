@@ -16,6 +16,7 @@
 #include "postprocess.h"
 #include "benchmark.h"
 #include "video_writer.h"
+#include "drm_display.h"
 
 #include <iostream>
 #include <string>
@@ -58,7 +59,11 @@ struct Options {
     bool show_fps = true;                // Show FPS overlay in output video
     std::set<int> class_filter;          // Classes to detect (empty = all)
     std::string class_filter_str;        // Original class names string
-    bool display_enabled = false;        // Enable display window
+    bool display_enabled = false;        // Enable display window (OpenCV)
+    bool fb_display_enabled = false;      // Enable framebuffer display (no X11)
+    bool use_vulkan = false;             // Use Vulkan GPU compute
+    bool use_int8 = false;               // Use INT8 quantized model
+    int gpu_device = 0;                  // Vulkan GPU device index
 };
 
 void print_usage(const char* program) {
@@ -79,6 +84,9 @@ void print_usage(const char* program) {
     std::cout << "  --no-fps             Don't show FPS overlay in output video\n";
     std::cout << "  --class NAMES        Filter classes (comma-separated, e.g., 'person,car,dog')\n";
     std::cout << "  --display            Show detection results in window (auto DISPLAY=:0)\n";
+    std::cout << "  --vulkan             Use Vulkan GPU (VideoCore VII) for inference\n";
+    std::cout << "  --int8               Use INT8 quantized model (faster, similar accuracy)\n";
+    std::cout << "  --gpu N              Vulkan GPU device index (default: 0)\n";
     std::cout << "  --verbose            Print per-frame results\n\n";
     std::cout << "Testing:\n";
     std::cout << "  --test-model         Test model loading\n";
@@ -100,6 +108,10 @@ bool parse_options(int argc, char* argv[], Options& opts) {
         {"no-fps", no_argument, 0, 'F'},
         {"class", required_argument, 0, 'C'},
         {"display", no_argument, 0, 'D'},
+        {"fb", no_argument, 0, 'B'},
+        {"vulkan", no_argument, 0, 'G'},
+        {"int8", no_argument, 0, 'I'},
+        {"gpu", required_argument, 0, 'g'},
         {"verbose", no_argument, 0, 'V'},
         {"test-model", no_argument, 0, '1'},
         {"test-inference", no_argument, 0, '2'},
@@ -110,7 +122,7 @@ bool parse_options(int argc, char* argv[], Options& opts) {
     };
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "bc:v:p:m:n:w:o:O:FC:DVd:h", long_options, nullptr)) != -1) {
+    while ((opt = getopt_long(argc, argv, "bc:v:p:m:n:w:o:O:FC:DGIg:Vd:h", long_options, nullptr)) != -1) {
         switch (opt) {
             case 'b':
                 opts.mode = "benchmark";
@@ -149,6 +161,18 @@ bool parse_options(int argc, char* argv[], Options& opts) {
                 break;
             case 'D':
                 opts.display_enabled = true;
+                break;
+            case 'B':
+                opts.fb_display_enabled = true;
+                break;
+            case 'G':
+                opts.use_vulkan = true;
+                break;
+            case 'I':
+                opts.use_int8 = true;
+                break;
+            case 'g':
+                opts.gpu_device = std::stoi(optarg);
                 break;
             case 'V':
                 opts.verbose = true;
@@ -370,10 +394,24 @@ int run_inference_pipeline(const Options& opts) {
     if (omp_threads) {
         engine_config.num_threads = std::atoi(omp_threads);
     } else {
-        engine_config.num_threads = NCNN_NUM_THREADS;
+        // OPTIMIZATION: Use fewer threads when display is active
+        // This reduces CPU contention with X11/Qt display thread
+        // Testing shows 3 threads + display = 26 FPS vs 4 threads + display = 22 FPS
+        if (opts.display_enabled) {
+            engine_config.num_threads = 3;  // Reserve 1 core for display
+            std::cout << "Display mode: Using 3 NCNN threads (reduce contention)\n";
+        } else {
+            engine_config.num_threads = NCNN_NUM_THREADS;
+        }
     }
     
-    engine_config.use_fp16 = true;  // Internal NCNN FP16, but we feed FP32
+    // INT8 and Vulkan options
+    engine_config.use_int8 = opts.use_int8;
+    engine_config.use_vulkan = opts.use_vulkan;
+    engine_config.gpu_device = opts.gpu_device;
+    
+    // Don't use FP16 with INT8 mode
+    engine_config.use_fp16 = !opts.use_int8;
     
     ErrorCode err = engine.initialize(engine_config);
     if (err != ErrorCode::SUCCESS) {
@@ -382,7 +420,11 @@ int run_inference_pipeline(const Options& opts) {
         return 1;
     }
     
-    std::cout << "Model loaded, warming up (NCNN threads=" << engine_config.num_threads << ")...\n";
+    // Print acceleration status
+    std::cout << "Model loaded (threads=" << engine_config.num_threads;
+    if (engine.is_using_int8()) std::cout << ", INT8";
+    if (engine.is_using_vulkan()) std::cout << ", Vulkan";
+    std::cout << "), warming up...\n";
     engine.warmup(30);  // Extended warmup for JIT/cache priming and stability
     
     // Initialize input pipeline
@@ -451,6 +493,25 @@ int run_inference_pipeline(const Options& opts) {
             neon::cleanup_preprocess_buffers();
             return 1;
         }
+    }
+    
+    // Initialize framebuffer display (if enabled) - bypasses X11, faster!
+    std::unique_ptr<FramebufferDisplay> fb_display;
+    if (opts.fb_display_enabled) {
+        fb_display = std::make_unique<FramebufferDisplay>();
+        FramebufferDisplay::Config fb_config;
+        fb_config.target_width = INPUT_WIDTH;
+        fb_config.target_height = INPUT_HEIGHT;
+        fb_config.draw_fps = opts.show_fps;
+        fb_config.draw_bbox = true;
+        
+        if (!fb_display->start(fb_config)) {
+            std::cerr << "Failed to initialize framebuffer display\n";
+            std::cerr << "Try: sudo chmod 666 /dev/fb0\n";
+            neon::cleanup_preprocess_buffers();
+            return 1;
+        }
+        std::cout << "Framebuffer mode: No X11 overhead, max FPS!\n";
     }
     
     // Initialize benchmark
@@ -570,10 +631,34 @@ int run_inference_pipeline(const Options& opts) {
         }
         
         // Push frame to async display (non-blocking)
-        if (display && frame.format == PixelFormat::BGR) {
-            cv::Mat bgr_frame(frame.height, frame.width, CV_8UC3, frame.data, frame.stride);
-            display->push(bgr_frame, result, frame.width, frame.height,
-                         rolling_fps, rolling_inference_ms);
+        if (display) {
+            if (frame.format == PixelFormat::BGR) {
+                cv::Mat bgr_frame(frame.height, frame.width, CV_8UC3, frame.data, frame.stride);
+                display->push(bgr_frame, result, frame.width, frame.height,
+                             rolling_fps, rolling_inference_ms);
+            } else if (frame.format == PixelFormat::YUYV) {
+                // Convert YUYV to BGR for display
+                cv::Mat yuyv_frame(frame.height, frame.width, CV_8UC2, frame.data, frame.stride);
+                cv::Mat bgr_frame;
+                cv::cvtColor(yuyv_frame, bgr_frame, cv::COLOR_YUV2BGR_YUYV);
+                display->push(bgr_frame, result, frame.width, frame.height,
+                             rolling_fps, rolling_inference_ms);
+            }
+        }
+        
+        // Push frame to framebuffer display (direct, no X11 overhead)
+        if (fb_display) {
+            if (frame.format == PixelFormat::BGR) {
+                fb_display->push_bgr(frame.data, frame.width, frame.height, frame.stride,
+                                    result, rolling_fps, rolling_inference_ms);
+            } else if (frame.format == PixelFormat::YUYV) {
+                // Convert YUYV to BGR for framebuffer display
+                cv::Mat yuyv_frame(frame.height, frame.width, CV_8UC2, frame.data, frame.stride);
+                cv::Mat bgr_frame;
+                cv::cvtColor(yuyv_frame, bgr_frame, cv::COLOR_YUV2BGR_YUYV);
+                fb_display->push_bgr(bgr_frame.data, bgr_frame.cols, bgr_frame.rows, 
+                                    bgr_frame.step, result, rolling_fps, rolling_inference_ms);
+            }
         }
         
         // Record timing

@@ -7,15 +7,22 @@
  * - Optimized thread count (2 threads for better cache sharing)
  * - Vectorized output transpose
  * - Zero-copy where possible
+ * - INT8 quantization support for 2-4x speedup
+ * - Vulkan GPU support for VideoCore VII (RPi5)
  */
 
 #include "inference_engine.h"
 #include "postprocess.h"
+#include "asm_kernels.h"
 
 #include <net.h>
 #include <cpu.h>
+#if NCNN_VULKAN
+#include <gpu.h>
+#endif
 #include <cstring>
 #include <arm_neon.h>
+#include <iostream>
 
 namespace yolo {
 
@@ -35,6 +42,14 @@ InferenceEngine::~InferenceEngine() {
     if (workspace_allocator_) {
         delete workspace_allocator_;
     }
+#if NCNN_VULKAN
+    if (blob_vkallocator_) {
+        delete blob_vkallocator_;
+    }
+    if (staging_vkallocator_) {
+        delete staging_vkallocator_;
+    }
+#endif
 }
 
 ErrorCode InferenceEngine::initialize(const Config& config) {
@@ -44,6 +59,20 @@ ErrorCode InferenceEngine::initialize(const Config& config) {
     ncnn::set_cpu_powersave(0);  // Use all cores at full speed
     ncnn::set_omp_num_threads(config.num_threads);
     
+#if NCNN_VULKAN
+    // Initialize Vulkan if requested
+    if (config.use_vulkan) {
+        int gpu_count = ncnn::get_gpu_count();
+        if (gpu_count > 0 && config.gpu_device < gpu_count) {
+            using_vulkan_ = true;
+            std::cout << "Vulkan GPU: " << ncnn::get_gpu_info(config.gpu_device).device_name() 
+                      << " (device " << config.gpu_device << "/" << gpu_count << ")\n";
+        } else {
+            std::cout << "Vulkan requested but no GPU found, falling back to CPU\n";
+        }
+    }
+#endif
+
     // Create NCNN pool allocators
     blob_pool_allocator_ = new ncnn::PoolAllocator();
     workspace_allocator_ = new ncnn::UnlockedPoolAllocator();
@@ -52,18 +81,55 @@ ErrorCode InferenceEngine::initialize(const Config& config) {
     blob_pool_allocator_->set_size_compare_ratio(0.0f);  // Exact match only
     workspace_allocator_->set_size_compare_ratio(0.0f);
     
+#if NCNN_VULKAN
+    if (using_vulkan_) {
+        ncnn::VulkanDevice* vkdev = ncnn::get_gpu_device(config.gpu_device);
+        blob_vkallocator_ = new ncnn::VkBlobAllocator(vkdev);
+        staging_vkallocator_ = new ncnn::VkStagingAllocator(vkdev);
+    }
+#endif
+
     // Create and configure network
     net_ = new ncnn::Net();
+    
+#if NCNN_VULKAN
+    if (using_vulkan_) {
+        net_->opt.use_vulkan_compute = true;
+        net_->set_vulkan_device(config.gpu_device);
+    }
+#endif
     
     net_->opt.lightmode = config.light_mode;
     net_->opt.num_threads = config.num_threads;
     net_->opt.use_packing_layout = config.use_packing;
-    net_->opt.use_fp16_packed = config.use_fp16;
-    net_->opt.use_fp16_storage = config.use_fp16;
-    net_->opt.use_fp16_arithmetic = config.use_fp16;
-    net_->opt.use_vulkan_compute = false;
+    
+    // INT8 specific settings
+    if (config.use_int8) {
+        using_int8_ = true;
+        net_->opt.use_int8_inference = true;
+        net_->opt.use_int8_storage = true;
+        net_->opt.use_int8_arithmetic = true;
+        // Disable FP16 when using INT8
+        net_->opt.use_fp16_packed = false;
+        net_->opt.use_fp16_storage = false;
+        net_->opt.use_fp16_arithmetic = false;
+        std::cout << "INT8 quantization enabled\n";
+    } else {
+        net_->opt.use_fp16_packed = config.use_fp16;
+        net_->opt.use_fp16_storage = config.use_fp16;
+        net_->opt.use_fp16_arithmetic = config.use_fp16;
+    }
+    
     net_->opt.blob_allocator = blob_pool_allocator_;
     net_->opt.workspace_allocator = workspace_allocator_;
+    
+#if NCNN_VULKAN
+    if (using_vulkan_) {
+        net_->opt.blob_vkallocator = blob_vkallocator_;
+        net_->opt.workspace_vkallocator = blob_vkallocator_;
+        net_->opt.staging_vkallocator = staging_vkallocator_;
+    }
+#endif
     
     // Load model
     int ret = net_->load_param(config.param_path.c_str());
@@ -132,32 +198,17 @@ ErrorCode InferenceEngine::infer_fp32(const float* input_data, DetectionResult& 
         return ErrorCode::INFERENCE_FAILED;
     }
     
-    // OPTIMIZED: Vectorized transpose [84, 8400] -> [8400, 84]
+    // OPTIMIZED: Assembly transpose [84, 8400] -> [8400, 84]
     int num_proposals = output.w;
     int num_channels = output.h;
     
-    // NEON-accelerated transpose
-    for (int i = 0; i < num_proposals; i += 4) {
-        for (int j = 0; j < num_channels; j++) {
-            const float* src = output.row(j);
-            float* dst = output_buffer_.get() + j;
-            
-            if (i + 4 <= num_proposals) {
-                // Process 4 proposals at once
-                float32x4_t v = vld1q_f32(src + i);
-                output_buffer_[i * num_channels + j] = vgetq_lane_f32(v, 0);
-                output_buffer_[(i+1) * num_channels + j] = vgetq_lane_f32(v, 1);
-                output_buffer_[(i+2) * num_channels + j] = vgetq_lane_f32(v, 2);
-                output_buffer_[(i+3) * num_channels + j] = vgetq_lane_f32(v, 3);
-            }
-        }
-    }
-    // Handle remainder
-    for (int i = (num_proposals / 4) * 4; i < num_proposals; i++) {
-        for (int j = 0; j < num_channels; j++) {
-            output_buffer_[i * num_channels + j] = output.row(j)[i];
-        }
-    }
+    // Use hand-tuned assembly for transpose
+    transpose_84x8400_asm(
+        (const float*)output.data,
+        output_buffer_.get(),
+        num_proposals,
+        num_channels
+    );
     
     // Decode outputs
     result.count = decode_yolov8_output(

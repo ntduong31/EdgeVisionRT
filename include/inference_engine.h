@@ -3,10 +3,12 @@
  * @brief NCNN-based YOLOv8n inference engine
  * 
  * Inference & NCNN Agent Design:
- * - Static NCNN build for Cortex-A76 with FP16
+ * - Static NCNN build for Cortex-A76 with FP16/INT8
  * - Thread pool pinned to CPU 2-3 (avoiding input thread on CPU 0-1)
  * - Pre-allocated blob memory to avoid runtime allocation
  * - Custom allocator for deterministic memory behavior
+ * - Vulkan GPU support for VideoCore VII (RPi5)
+ * - INT8 quantization support for 2-4x speedup
  */
 
 #ifndef YOLO_INFERENCE_ENGINE_H
@@ -15,6 +17,9 @@
 #include "common.h"
 #include <string>
 #include <net.h>
+#if NCNN_VULKAN
+#include <gpu.h>
+#endif
 
 namespace yolo {
 
@@ -33,6 +38,9 @@ public:
         bool use_fp16 = true;       // Use FP16 inference
         bool use_packing = true;    // Use NEON packing
         int light_mode = 1;         // NCNN light mode
+        bool use_vulkan = false;    // Use Vulkan GPU compute
+        bool use_int8 = false;      // Use INT8 quantized model
+        int gpu_device = 0;         // Vulkan GPU device index
     };
 
     InferenceEngine();
@@ -80,6 +88,16 @@ public:
     bool is_initialized() const { return initialized_; }
 
     /**
+     * @brief Check if Vulkan GPU is being used
+     */
+    bool is_using_vulkan() const { return using_vulkan_; }
+
+    /**
+     * @brief Check if INT8 quantization is being used
+     */
+    bool is_using_int8() const { return using_int8_; }
+
+    /**
      * @brief Get model input dimensions
      */
     void get_input_size(int& width, int& height) const {
@@ -105,11 +123,17 @@ private:
     void apply_nms(DetectionResult& result);
 
     bool initialized_ = false;
+    bool using_vulkan_ = false;
+    bool using_int8_ = false;
     Config config_;
     
     ncnn::Net* net_ = nullptr;
     ncnn::PoolAllocator* blob_pool_allocator_ = nullptr;
     ncnn::UnlockedPoolAllocator* workspace_allocator_ = nullptr;
+#if NCNN_VULKAN
+    ncnn::VkAllocator* blob_vkallocator_ = nullptr;
+    ncnn::VkAllocator* staging_vkallocator_ = nullptr;
+#endif
     
     // Pre-allocated buffers
     AlignedPtr<float> output_buffer_;

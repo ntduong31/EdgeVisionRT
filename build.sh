@@ -3,9 +3,10 @@
 # Quick Build Script for YOLOv8n Inference System
 #
 # Usage:
-#   ./build.sh          # Standard build
+#   ./build.sh          # Standard build with NCNN Vulkan if available
 #   ./build.sh clean    # Clean and rebuild
 #   ./build.sh debug    # Debug build
+#   ./build.sh vulkan   # Force Vulkan NCNN build
 #
 
 set -e
@@ -13,11 +14,15 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="${SCRIPT_DIR}/build"
 DEPS_DIR="${SCRIPT_DIR}/deps"
+
+# NCNN installations (prioritize Vulkan version)
+NCNN_VULKAN_INSTALL="${DEPS_DIR}/ncnn-vulkan-install"
 NCNN_INSTALL="${DEPS_DIR}/ncnn-install"
 
 # Parse arguments
 BUILD_TYPE="Release"
 CLEAN=0
+USE_VULKAN=0
 
 for arg in "$@"; do
     case $arg in
@@ -27,9 +32,12 @@ for arg in "$@"; do
         debug)
             BUILD_TYPE="Debug"
             ;;
+        vulkan)
+            USE_VULKAN=1
+            ;;
         *)
             echo "Unknown argument: $arg"
-            echo "Usage: $0 [clean] [debug]"
+            echo "Usage: $0 [clean] [debug] [vulkan]"
             exit 1
             ;;
     esac
@@ -45,21 +53,26 @@ fi
 mkdir -p "${BUILD_DIR}"
 cd "${BUILD_DIR}"
 
-# Check for NCNN
-if [ -d "${NCNN_INSTALL}" ]; then
+# Check for NCNN (prefer Vulkan version if available)
+NCNN_DIR=""
+NCNN_TYPE=""
+
+if [ -d "${NCNN_VULKAN_INSTALL}" ]; then
+    NCNN_DIR="${NCNN_VULKAN_INSTALL}/lib/cmake/ncnn"
+    NCNN_TYPE="Vulkan+INT8"
+elif [ -d "${NCNN_INSTALL}" ]; then
     NCNN_DIR="${NCNN_INSTALL}/lib/cmake/ncnn"
-else
-    # Try system NCNN
-    NCNN_DIR=""
+    NCNN_TYPE="CPU-only"
 fi
 
 echo "================================="
-echo "YOLOv8n Inference System Build"
+echo "EdgeVision RT Build"
 echo "================================="
-echo "Build type: ${BUILD_TYPE}"
-echo "Build dir:  ${BUILD_DIR}"
+echo "Build type:   ${BUILD_TYPE}"
+echo "NCNN type:    ${NCNN_TYPE}"
+echo "Build dir:    ${BUILD_DIR}"
 if [ -n "${NCNN_DIR}" ]; then
-    echo "NCNN dir:   ${NCNN_DIR}"
+    echo "NCNN dir:     ${NCNN_DIR}"
 fi
 echo ""
 
@@ -89,11 +102,17 @@ echo "================================="
 # Print usage
 echo ""
 echo "Usage examples:"
-echo "  # Test model loading:"
-echo "  ./yolo_inference --test-model --param ../models/yolov8n_fp16.param --bin ../models/yolov8n_fp16.bin"
+echo "  # Basic benchmark (FP32):"
+echo "  ./run.sh"
 echo ""
-echo "  # Run benchmark with video:"
-echo "  ./yolo_inference --video ../tests/test_video/benchmark.mp4 --param ../models/yolov8n_fp16.param --bin ../models/yolov8n_fp16.bin --frames 1000"
+echo "  # INT8 quantization (2-4x faster!):"
+echo "  ./run.sh int8"
 echo ""
-echo "  # Run with camera:"
-echo "  ./yolo_inference --camera /dev/video0 --param ../models/yolov8n_fp16.param --bin ../models/yolov8n_fp16.bin"
+echo "  # INT8 + Vulkan GPU (fastest!):"
+echo "  ./run.sh int8 vulkan"
+echo ""
+echo "  # With display + class filter:"
+echo "  ./run.sh int8 display class person"
+echo ""
+echo "  # Save video output:"
+echo "  ./run.sh int8 video output.mp4"

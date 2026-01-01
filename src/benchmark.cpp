@@ -250,7 +250,7 @@ std::string format_stats_table(const BenchmarkStats& stats) {
     ss << "║  Frames > 50ms:    " << std::setw(10) << stats.frames_over_50ms << "                                ║\n";
     ss << "╠══════════════════════════════════════════════════════════════╣\n";
     ss << "║  LATENCY (microseconds)                                      ║\n";
-    ss << "║    Mean:           " << std::setw(10) << std::fixed << std::setprecision(1) << stats.mean_total_us << "                              ║\n";
+    ss << "║    Mean:           " << std::setw(10) << std::fixed << std::setprecision(1) << stats.mean_total_us << "                                ║\n";
     ss << "║    Std Dev:        " << std::setw(10) << stats.std_total_us << "                                ║\n";
     ss << "║    Min:            " << std::setw(10) << stats.min_total_us << "                                ║\n";
     ss << "║    Max:            " << std::setw(10) << stats.max_total_us << "                                ║\n";
@@ -265,8 +265,8 @@ std::string format_stats_table(const BenchmarkStats& stats) {
     ss << "║    Inference:      " << std::setw(10) << stats.mean_inference_us << "                                ║\n";
     ss << "║    Postprocess:    " << std::setw(10) << stats.mean_postprocess_us << "                                ║\n";
     ss << "╠══════════════════════════════════════════════════════════════╣\n";
-    ss << "║  THROUGHPUT (FPS)                                              ║\n";
-    ss << "║    Mean:           " << std::setw(10) << std::setprecision(2) << stats.fps_mean << "                              ║\n";
+    ss << "║  THROUGHPUT (FPS)                                            ║\n";
+    ss << "║    Mean:           " << std::setw(10) << std::setprecision(2) << stats.fps_mean << "                                ║\n";
     ss << "║    P50:            " << std::setw(10) << stats.fps_p50 << "                                ║\n";
     ss << "║    P99:            " << std::setw(10) << stats.fps_p99 << "                                ║\n";
     ss << "╠══════════════════════════════════════════════════════════════╣\n";
@@ -274,9 +274,9 @@ std::string format_stats_table(const BenchmarkStats& stats) {
     ss << "║    Peak RSS:       " << std::setw(10) << stats.peak_memory_kb / 1024 << " MB                             ║\n";
     ss << "╠══════════════════════════════════════════════════════════════╣\n";
     ss << "║  PASS/FAIL CRITERIA                                          ║\n";
-    ss << "║    ≥20 FPS (P99):  " << std::setw(10) << (stats.meets_20fps_requirement() ? "PASS ✓" : "FAIL ✗") << "                                ║\n";
-    ss << "║    ≤50ms latency:  " << std::setw(10) << (stats.meets_latency_requirement() ? "PASS ✓" : "FAIL ✗") << "                                ║\n";
-    ss << "║    ≤5ms jitter:    " << std::setw(10) << (stats.meets_jitter_requirement() ? "PASS ✓" : "FAIL ✗") << "                                ║\n";
+    ss << "║    ≥20 FPS (P99):  " << std::setw(10) << (stats.meets_20fps_requirement() ? "PASS ✓" : "FAIL ✗") << "                                  ║\n";
+    ss << "║    ≤50ms latency:  " << std::setw(10) << (stats.meets_latency_requirement() ? "PASS ✓" : "FAIL ✗") << "                                  ║\n";
+    ss << "║    ≤5ms jitter:    " << std::setw(10) << (stats.meets_jitter_requirement() ? "PASS ✓" : "FAIL ✗") << "                                  ║\n";
     ss << "╠══════════════════════════════════════════════════════════════╣\n";
     
     if (stats.is_valid()) {
