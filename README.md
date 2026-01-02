@@ -82,18 +82,6 @@ The `run.sh` script handles governor settings, thread affinity, and library path
 ./run.sh fb
 ```
 
-#### Acceleration Options
-```bash
-# Use FP16 (Recommended)
-./run.sh cam display fp16
-
-# Use INT8 Quantization (Fastest inference)
-./run.sh cam display int8
-
-# Use Vulkan GPU (VideoCore VII)
-./run.sh cam display vulkan
-```
-
 ---
 
 ## Display Modes Explained
