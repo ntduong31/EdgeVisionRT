@@ -1,0 +1,7 @@
+/home/pi/AI/EdgeVisionRT/build/CMakeFiles/yolo_inference.dir
+/home/pi/AI/EdgeVisionRT/build/CMakeFiles/edit_cache.dir
+/home/pi/AI/EdgeVisionRT/build/CMakeFiles/rebuild_cache.dir
+/home/pi/AI/EdgeVisionRT/build/CMakeFiles/list_install_components.dir
+/home/pi/AI/EdgeVisionRT/build/CMakeFiles/install.dir
+/home/pi/AI/EdgeVisionRT/build/CMakeFiles/install/local.dir
+/home/pi/AI/EdgeVisionRT/build/CMakeFiles/install/strip.dir
