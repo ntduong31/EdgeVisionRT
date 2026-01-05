@@ -21,6 +21,16 @@
 
 set -e
 
+# Fix runtime directory permissions if needed (for Qt/OpenCV display)
+RUNTIME_DIR="/run/user/$(id -u)"
+if [ -d "$RUNTIME_DIR" ]; then
+    CURRENT_PERMS=$(stat -c "%a" "$RUNTIME_DIR")
+    if [ "$CURRENT_PERMS" != "700" ]; then
+        echo "Fixing runtime directory permissions..."
+        sudo chmod 0700 "$RUNTIME_DIR" 2>/dev/null || true
+    fi
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="${SCRIPT_DIR}/build"
 BINARY="${BUILD_DIR}/yolo_inference"

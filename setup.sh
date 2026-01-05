@@ -44,6 +44,17 @@ else
     echo "Warning: script run as root without sudo, cannot detect user to add to video group."
 fi
 
+echo ">> Fixing runtime directory permissions..."
+# Fix Qt/OpenCV runtime directory permissions issue
+if [ ! -z "$SUDO_USER" ]; then
+    SUDO_UID=$(id -u $SUDO_USER)
+    RUNTIME_DIR="/run/user/$SUDO_UID"
+    if [ -d "$RUNTIME_DIR" ]; then
+        chmod 0700 "$RUNTIME_DIR"
+        echo "Fixed permissions for $RUNTIME_DIR to 0700"
+    fi
+fi
+
 echo ">> Installing NCNN with Vulkan and INT8 support..."
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NCNN_VULKAN_DIR="$SCRIPT_DIR/deps/ncnn-vulkan-install"
