@@ -210,8 +210,8 @@ public:
         bool use_ffmpeg = true;
     };
     
-    AsyncVideoWriter() : running_(false), frames_written_(0), frames_dropped_(0), 
-                         ffmpeg_pipe_(nullptr) {}
+    AsyncVideoWriter() : ffmpeg_pipe_(nullptr), running_(false), 
+                         frames_written_(0), frames_dropped_(0) {}
     
     ~AsyncVideoWriter() {
         stop();
@@ -418,9 +418,9 @@ public:
         float max_screen_ratio = 0.8f;  // Max 80% of screen size
     };
     
-    AsyncDisplay() : running_(false), frames_displayed_(0), frames_dropped_(0),
-                     display_width_(640), display_height_(480), 
-                     pending_frame_ready_(false) {}
+    AsyncDisplay() : display_width_(640), display_height_(480), 
+                     running_(false), frames_displayed_(0), 
+                     frames_dropped_(0), pending_frame_ready_(false) {}
     
     ~AsyncDisplay() {
         stop();

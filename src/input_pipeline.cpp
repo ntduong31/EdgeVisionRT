@@ -328,8 +328,9 @@ void InputPipeline::capture_loop_video(FrameCallback callback) {
     }
     
     // Get video properties
-    int video_width = static_cast<int>(cap.get(cv::CAP_PROP_FRAME_WIDTH));
-    int video_height = static_cast<int>(cap.get(cv::CAP_PROP_FRAME_HEIGHT));
+    // Note: video_width and video_height are available but not currently used
+    // int video_width = static_cast<int>(cap.get(cv::CAP_PROP_FRAME_WIDTH));
+    // int video_height = static_cast<int>(cap.get(cv::CAP_PROP_FRAME_HEIGHT));
     double video_fps = cap.get(cv::CAP_PROP_FPS);
     
     // Store FPS for external access

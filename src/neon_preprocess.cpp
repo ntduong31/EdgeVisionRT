@@ -259,8 +259,9 @@ void bilinear_resize_rgb_neon(
         int wy1 = fy >> 8;  // 0-255 range
         int wy0 = 256 - wy1;
         
-        int16x8_t v_wy0 = vdupq_n_s16(wy0);
-        int16x8_t v_wy1 = vdupq_n_s16(wy1);
+        // NEON weights for vertical interpolation (currently unused in scalar path)
+        (void)wy0; // Suppress unused warning
+        (void)wy1; // Suppress unused warning
         
         // Process 8 destination pixels per iteration
         int dx = 0;
@@ -653,9 +654,11 @@ static void bilinear_resize_bgr_to_rgb_neon(
 /**
  * RGB to CHW FP32 conversion with NEON vectorization
  * Disable aggressive loop optimizations to avoid false warnings
+ * Note: Function currently unused but kept for potential future use
  */
 #pragma GCC push_options
 #pragma GCC optimize ("no-aggressive-loop-optimizations")
+__attribute__((unused))
 static void rgb_to_chw_fp32_neon(
     const uint8_t* __restrict src,
     float* __restrict dst,
@@ -761,10 +764,8 @@ void preprocess_bgr_direct(
     const uint8_t gray = 114;
     memset(g_letterbox_buffer, gray, MODEL_SIZE * MODEL_SIZE * 3);
     
-    // Resize BGR->RGB directly to center of letterbox buffer
-    uint8_t* letterbox_center = g_letterbox_buffer + 
-                                (*pad_y) * MODEL_SIZE * 3 + 
-                                (*pad_x) * 3;
+    // Note: letterbox_center calculation kept for reference but not used directly
+    // uint8_t* letterbox_center = g_letterbox_buffer + (*pad_y) * MODEL_SIZE * 3 + (*pad_x) * 3;
     
     // Resize with BGR->RGB conversion
     bilinear_resize_bgr_to_rgb_neon(

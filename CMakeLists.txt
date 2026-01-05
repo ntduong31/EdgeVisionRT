@@ -12,9 +12,12 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # Optimization flags for Cortex-A76
 set(CORTEX_A76_FLAGS "-march=armv8.2-a+fp16+dotprod -mtune=cortex-a76")
 
+# Comprehensive warning flags (excluding overly pedantic type conversion warnings)
+set(WARNING_FLAGS "-Wall -Wextra -Wpedantic -Wshadow -Wnull-dereference -Wformat=2 -Wno-unused-parameter")
+
 # Release build flags
-set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} ${CORTEX_A76_FLAGS} -O3 -ffast-math -flto -DNDEBUG")
-set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} ${CORTEX_A76_FLAGS} -O3 -ffast-math -flto -DNDEBUG -fno-rtti -fno-exceptions")
+set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} ${CORTEX_A76_FLAGS} ${WARNING_FLAGS} -O3 -ffast-math -flto -DNDEBUG")
+set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} ${CORTEX_A76_FLAGS} ${WARNING_FLAGS} -O3 -ffast-math -flto -DNDEBUG -fno-rtti -fno-exceptions")
 
 # Debug flags
 set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} ${CORTEX_A76_FLAGS} -O0 -g -DDEBUG")
@@ -60,9 +63,10 @@ endif()
 
 # OpenCV (for video file reading)
 # Try find_package first, fallback to manual configuration
-find_package(OpenCV QUIET COMPONENTS core imgproc videoio)
+find_package(OpenCV QUIET COMPONENTS core imgproc videoio highgui)
 if(OpenCV_FOUND)
     message(STATUS "OpenCV found via CMake: ${OpenCV_VERSION}")
+    message(STATUS "OpenCV libs: ${OpenCV_LIBS}")
 else()
     # Manual OpenCV configuration for Debian/Raspbian
     message(STATUS "OpenCV CMake config not found, using manual configuration")

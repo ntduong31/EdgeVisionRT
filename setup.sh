@@ -44,37 +44,74 @@ else
     echo "Warning: script run as root without sudo, cannot detect user to add to video group."
 fi
 
-echo ">> Installing NCNN..."
-# We use the local deps provided in the repo, but if we needed to build it:
-# (This section is optional if we assume deps/ is populated, 
-#  but good for a fresh environment setup if deps is missing)
+echo ">> Installing NCNN with Vulkan and INT8 support..."
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+NCNN_VULKAN_DIR="$SCRIPT_DIR/deps/ncnn-vulkan-install"
 
-NCNN_DIR="deps/ncnn-install"
-if [ ! -d "$NCNN_DIR" ]; then
-    echo "NCNN not found in deps/, building from source..."
+# Check if NCNN is properly installed with cmake config files
+if [ -f "$NCNN_VULKAN_DIR/lib/cmake/ncnn/ncnnConfig.cmake" ]; then
+    echo "NCNN already properly installed in deps/ncnn-vulkan-install with cmake config."
+else
+    echo "Building NCNN from source with Vulkan + INT8 support..."
+    
+    # Clean up any incomplete installations
+    cd "$SCRIPT_DIR"
+    rm -rf deps/ncnn deps/ncnn-install deps/ncnn-vulkan-install
     mkdir -p deps
     cd deps
-    if [ ! -d "ncnn" ]; then
-        git clone https://github.com/Tencent/ncnn.git
-    fi
+    
+    # Clone NCNN repository
+    echo "Cloning NCNN repository..."
+    git clone --depth=1 https://github.com/Tencent/ncnn.git
+    
+    # Build NCNN with Vulkan support
+    echo "Configuring NCNN build..."
     cd ncnn
-    mkdir -p build
-    cd build
-    cmake -DCMAKE_TOOLCHAIN_FILE=../toolchains/aarch64-linux-gnu.toolchain.cmake \
-          -DNCNN_VULKAN=ON \
-          -DNCNN_BUILD_EXAMPLES=OFF \
-          -DNCNN_BUILD_TOOLS=OFF \
-          -DNCNN_SYSTEM_GLSLANG=ON \
-          ..
+    mkdir -p build-vulkan
+    cd build-vulkan
+    
+    cmake \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DNCNN_VULKAN=ON \
+        -DNCNN_BUILD_EXAMPLES=OFF \
+        -DNCNN_BUILD_TOOLS=ON \
+        -DNCNN_SYSTEM_GLSLANG=ON \
+        -DNCNN_BUILD_BENCHMARK=OFF \
+        -DNCNN_INT8=ON \
+        -DCMAKE_INSTALL_PREFIX="$NCNN_VULKAN_DIR" \
+        ..
+    
+    if [ $? -ne 0 ]; then
+        echo "Error: CMake configuration failed!"
+        exit 1
+    fi
+    
+    # Build NCNN
+    echo "Building NCNN (this may take 5-10 minutes)..."
     make -j$(nproc)
+    
+    if [ $? -ne 0 ]; then
+        echo "Error: NCNN build failed!"
+        exit 1
+    fi
+    
+    # Install NCNN
+    echo "Installing NCNN..."
     make install
-    # Link to expected location
-    cd ../..
-    rm -rf ncnn-install
-    mv ncnn/build/install ncnn-install
-    cd ..
-else
-    echo "NCNN already installed in deps/ncnn-install."
+    
+    if [ $? -ne 0 ]; then
+        echo "Error: NCNN installation failed!"
+        exit 1
+    fi
+    
+    # Verify installation
+    if [ ! -f "$NCNN_VULKAN_DIR/lib/cmake/ncnn/ncnnConfig.cmake" ]; then
+        echo "Error: NCNN cmake config files not found after installation!"
+        exit 1
+    fi
+    
+    echo "NCNN successfully installed with Vulkan + INT8 support."
+    cd "$SCRIPT_DIR"
 fi
 
 echo ">> Configuring CPU Governor service..."

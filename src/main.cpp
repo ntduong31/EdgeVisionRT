@@ -586,8 +586,8 @@ int run_inference_pipeline(const Options& opts) {
         {
             ScopedTimer timer(inference_time);
             
-            ErrorCode err = engine.infer_fp32(model_input.get(), result);
-            if (err != ErrorCode::SUCCESS) {
+            ErrorCode infer_err = engine.infer_fp32(model_input.get(), result);
+            if (infer_err != ErrorCode::SUCCESS) {
                 std::cerr << "Inference failed on frame " << frame.frame_index << "\n";
             }
         }
